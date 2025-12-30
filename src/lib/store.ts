@@ -1,4 +1,4 @@
-import { createClient } from "redis";
+import { kv } from "@vercel/kv";
 
 export interface PasteData {
   content: string;
@@ -6,54 +6,36 @@ export interface PasteData {
   remainingViews: number | null;
 }
 
-const redis = createClient({
-  url: process.env.REDIS_URL,
-});
-
-redis.on("error", (err) => {
-  console.error("Redis Client Error", err);
-});
-
-if (!redis.isOpen) {
-  await redis.connect();
-}
-
 /**
  * Save a paste
  */
-export async function savePaste(
-  id: string,
-  data: PasteData
-): Promise<void> {
-  const ttl = data.expiresAt
-    ? Math.ceil((data.expiresAt - Date.now()) / 1000)
-    : 7 * 24 * 60 * 60;
+export async function savePaste(id: string, data: PasteData): Promise<void> {
+  const key = `paste:${id}`;
 
-  await redis.set(
-    `paste:${id}`,
-    JSON.stringify(data),
-    {
-      EX: Math.max(1, ttl),
-    }
-  );
+  const ttl =
+    data.expiresAt != null
+      ? Math.max(1, Math.floor((data.expiresAt - Date.now()) / 1000))
+      : undefined;
+
+  await kv.set(key, data);
+
+  if (ttl) {
+    await kv.expire(key, ttl);
+  }
 }
 
 /**
  * Get a paste
  */
-export async function getPaste(
-  id: string
-): Promise<PasteData | null> {
-  const data = await redis.get(`paste:${id}`);
-  if (!data) return null;
-  return JSON.parse(data) as PasteData;
+export async function getPaste(id: string): Promise<PasteData | null> {
+  const key = `paste:${id}`;
+  const data = await kv.get<PasteData>(key);
+  return data ?? null;
 }
 
 /**
  * Delete a paste
  */
-export async function deletePaste(
-  id: string
-): Promise<void> {
-  await redis.del(`paste:${id}`);
+export async function deletePaste(id: string): Promise<void> {
+  await kv.del(`paste:${id}`);
 }
